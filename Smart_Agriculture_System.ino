@@ -9,13 +9,18 @@
 #define waterPumpPin D4
 #define waterPumpPin2 D5
 #define DHTTYPE DHT22   // DHT 22  (AM2302), AM2321
+#define soilMoistReaderPin D7
+#define soilPhReaderPin D8
 int soilSensorPin = A0;  /* Soil moisture sensor O/P pin */
 
 
 // Define variables for Ultra Sonic:
-int waterLevel;
-int moistPer;
+int waterLevel = 2;
+int moistPer = 25;
 DHT dht(DHTPIN, DHTTYPE);
+
+unsigned long sendDataPrevMillis = 0;
+unsigned long updateDataPrevMillis = 0;
 
 // Struct for humidity~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 struct DHTData {
@@ -33,18 +38,24 @@ DHTData dhtData;
 //char auth[] = "hmw_WPi_sOHF7F47PpU-sx-3b9Mp_aHW"; // D //Authentication code sent by Blynk
 char auth[] = "NBAPQU7zUDyTv4_YKOm1WbM1TzX6dUrf"; // S Authentication code sent by Blynk
 
-char ssid[] = "M.Sajid";                       //WiFi SSID
-char pass[] = "0987654321";                       //WiFi Password
+char ssid[] = "DreamNetSDA";                       //WiFi SSID
+char pass[] = "Daniyal444";                       //WiFi Password
+//char ssid[] = "M.Sajid";                       //WiFi SSID
+//char pass[] = "0987654321";                       //WiFi Password
 
 
 void setup() {
 
   Serial.begin(9600);
 
+  Serial.println("Connecting to Wifi");
+
   Blynk.begin(auth, ssid, pass);
+  Serial.println("Wifi connected");
 
   //  Start DHT Sensor
   dht.begin();
+  Serial.println("dht connected");
 
   // Define inputs and outputs:
   pinMode(trigPin, OUTPUT);
@@ -52,6 +63,8 @@ void setup() {
   pinMode(buzzer, OUTPUT);
   pinMode(waterPumpPin, OUTPUT);
   pinMode(waterPumpPin2, OUTPUT);
+  pinMode(soilMoistReaderPin, OUTPUT);
+  pinMode(soilPhReaderPin, OUTPUT);
   digitalWrite(waterPumpPin, HIGH);
   digitalWrite(waterPumpPin2, HIGH);
 
@@ -60,55 +73,68 @@ void setup() {
 
 void loop() {
 
-    Blynk.run();
-//    Getting Water level
+  Blynk.run();
+
+  if (millis() - updateDataPrevMillis > 600) {
+    updateDataPrevMillis = millis();
+
+    //    Getting Water level
     waterLevel = getWaterLevel();
-    
-//  Getting Moist percentage
+
+    //  Getting Moist percentage
     moistPer = getMoistLevel();
 
-    
-  //  Getting Temperature, Humidity and HeatIndex
-    dhtData = getTemperature_Humidity_HIC();
-  //  Serial.println(dhtData.humidity);
-  //  Serial.println(dhtData.temp);
-  //  Serial.println(dhtData.heatIndex);
-
-  Blynk.virtualWrite(V1, dhtData.humidity);  //V1 is for humidity
-  Blynk.virtualWrite(V2, dhtData.temp);  //V2 is for temperature
-  Blynk.virtualWrite(V3, dhtData.heatIndex);  //V3 is for heat index
-  Blynk.virtualWrite(V4, waterLevel);  //V3 is for Water Level
-  Blynk.virtualWrite(V5, moistPer);  //V3 is for moistPer
-  
-  
-
-//checking water level~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  if (waterLevel > 2)
-  {
-    
-    digitalWrite(waterPumpPin2, LOW); // Pump2 on
   }
-  else
+
+
+  if (millis() - sendDataPrevMillis > 15000) {
+
+    sendDataPrevMillis = millis();
+
+    //  Getting Temperature, Humidity and HeatIndex
+    dhtData = getTemperature_Humidity_HIC();
+    //  Serial.println(dhtData.humidity);
+    //  Serial.println(dhtData.temp);
+    //  Serial.println(dhtData.heatIndex);
+
+    float phLevel = getPhLevel();
+
+    Blynk.virtualWrite(V1, dhtData.humidity);  //V1 is for humidity
+    Blynk.virtualWrite(V2, dhtData.temp);  //V2 is for temperature
+    Blynk.virtualWrite(V3, dhtData.heatIndex);  //V3 is for heat index
+    Blynk.virtualWrite(V4, phLevel);  //V3 is for heat index
+  }
+
+
+  //checking water level~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  if (waterLevel > 2 && waterLevel != 0)
+  {
+    digitalWrite(waterPumpPin2, LOW); // Pump2 on
+    Blynk.virtualWrite(V4, waterLevel);  //V3 is for Water Level
+  }
+  else if (waterLevel != 0 && waterLevel <= 2)
   {
     digitalWrite(waterPumpPin2, HIGH); // Pump2 off
+    Blynk.virtualWrite(V4, waterLevel);  //V3 is for Water Level
   }
 
 
-//checking moist level~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  //checking moist level~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   if (moistPer < 25) {
+
     // Calculate the distance:
-    waterLevel = getWaterLevel();
     if (waterLevel <= 4)
     {
       digitalWrite(waterPumpPin, LOW); // Pump on
     }
-//    delay(2000);
+
+    Blynk.virtualWrite(V5, moistPer);  //V3 is for moistPer
   }
-  else if (moistPer > 50)
+  else if (moistPer > 35)
   {
     digitalWrite(waterPumpPin, HIGH); // Pump off
-//    delay(2000);
+    Blynk.virtualWrite(V5, moistPer);  //V3 is for moistPer
   }
 
 
@@ -163,6 +189,9 @@ struct DHTData getTemperature_Humidity_HIC()
 
 float getMoistLevel()
 {
+  digitalWrite(soilMoistReaderPin, HIGH); // Turn D7 On
+  digitalWrite(soilPhReaderPin, LOW); // Turn D8 Off
+
   float moisture_percentage;
   int sensor_analog;
   sensor_analog = analogRead(soilSensorPin);
@@ -171,6 +200,21 @@ float getMoistLevel()
   Serial.print(moisture_percentage);
   Serial.print("%\n\n");
   return moisture_percentage;
+}
+
+
+float getPhLevel()
+{
+  digitalWrite(soilMoistReaderPin, LOW); // Turn D8 Off
+  digitalWrite(soilPhReaderPin, HIGH); // Turn D7 On
+
+  float soil_ph_value;
+  int sensor_analog;
+  sensor_analog = analogRead(soilSensorPin);
+  soil_ph_value = ( 100 - ( (sensor_analog / 1023.00) * 100 ) );
+  Serial.print("PH of Soil Sensor: ");
+  Serial.println(sensor_analog/100);
+  return sensor_analog/100;
 }
 
 
